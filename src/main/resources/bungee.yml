@@ -1,0 +1,6 @@
+name: org.example.sample.SamplePlugin
+main: SamplePlugin
+version: 0.0.1
+libraries:
+  - org.jetbrains.kotlin:kotlin-stdlib-jdk8:1.6.10
+  - org.jetbrains.kotlin:kotlin-reflect:1.6.10
