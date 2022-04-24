@@ -1,2 +1,2 @@
-rootProject.name = "BungeeSample"
+rootProject.name = "BtwImKomq"
 

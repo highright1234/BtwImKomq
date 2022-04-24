@@ -2,7 +2,7 @@ plugins {
     kotlin("jvm") version "1.6.10"
 }
 
-group = "org.example"
+group = "io.github.highright1234"
 version = "0.0.1-SNAPSHOT"
 
 repositories {
@@ -11,7 +11,9 @@ repositories {
 }
 
 dependencies {
-    compileOnly("net.md-5:bungeecord-api:1.17-R0.1-SNAPSHOT")
+    // for bungeecord-proxy
+    compileOnly(files("libs/bungeecord.jar"))
+//    compileOnly("net.md-5:bungeecord-api:1.17-R0.1-SNAPSHOT")
     compileOnly(kotlin("stdlib"))
 }
 

@@ -1,5 +1,5 @@
-name: org.example.sample.SamplePlugin
-main: SamplePlugin
+main: io.github.highright1234.btwimkomq.BtwImKomq
+name: BtwImKomq
 version: 0.0.1
 libraries:
   - org.jetbrains.kotlin:kotlin-stdlib-jdk8:1.6.10
