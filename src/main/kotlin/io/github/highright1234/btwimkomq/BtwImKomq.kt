@@ -1,10 +1,15 @@
 package io.github.highright1234.btwimkomq
 
+import com.google.common.collect.MapMaker
 import com.google.common.reflect.ClassPath
+import io.github.highright1234.btwimkomq.listener.ServerConnectL
 import net.md_5.bungee.BungeeCord
+import net.md_5.bungee.ServerConnection
 import net.md_5.bungee.UserConnection
+import net.md_5.bungee.api.ServerConnectRequest
 import net.md_5.bungee.api.chat.TextComponent
 import net.md_5.bungee.api.connection.ProxiedPlayer
+import net.md_5.bungee.api.event.ServerConnectEvent
 import net.md_5.bungee.api.plugin.Command
 import net.md_5.bungee.api.plugin.Listener
 import net.md_5.bungee.api.plugin.Plugin
@@ -13,6 +18,7 @@ import net.md_5.bungee.config.ConfigurationProvider
 import net.md_5.bungee.config.YamlConfiguration
 import net.md_5.bungee.connection.LoginResult
 import net.md_5.bungee.http.HttpClient
+import net.md_5.bungee.netty.HandlerBoss
 import java.io.File
 import java.util.*
 
@@ -21,53 +27,78 @@ class BtwImKomq : Plugin() {
     companion object {
         lateinit var instance : BtwImKomq
         private set
-        private val dataForFaking : Configuration by lazy {
-            ConfigurationProvider.getProvider(YamlConfiguration::class.java).load(
-                File(instance.dataFolder, "data.yml")
-            )
+        private val dataFile : File by lazy {
+            File(instance.dataFolder, "data.yml").also {
+                if (!it.parentFile.exists()) {
+                    it.parentFile.mkdir()
+                    if (!it.exists()) {
+                        it.createNewFile()
+                    }
+                }
+            }
         }
-        private const val MOJANG_PROFILE_URL = "https://sessionserver.mojang.com/session/minecraft/profile/%s"
+        private val dataForFaking : Configuration by lazy {
+            ConfigurationProvider.getProvider(
+                YamlConfiguration::class.java
+            ).load(dataFile)
+        }
+        private const val MOJANG_PROFILE_URL = "https://sessionserver.mojang.com/session/minecraft/profile/%s?unsigned=false"
         private fun ProxiedPlayer.reconnect() {
             if (isConnected) {
-                val serverInfo = server.info
+                val serverCon = server as ServerConnection
+                serverCon.info.removePlayer(this)
+                val reason = ServerConnectEvent.Reason.PLUGIN
+                val request = ServerConnectRequest.builder()
+                    .target(serverCon.info)
+                    .connectTimeout(5000)
+                    .retry(true)
+                    .reason(reason)
+                    .sendFeedback(false)
+                    .callback { _, _ ->  }
+                    .build()
+                ServerConnectL.on(ServerConnectEvent(this, serverCon.info, reason, request))
+                val handlerBoss = serverCon.ch.handle.pipeline().get(HandlerBoss::class.java)
+                HandlerBoss::class.java.getDeclaredField("handler").apply {
+                    isAccessible = true
+                }.set(handlerBoss, null)
                 server.disconnect(TextComponent("Reconnect"))
-                connect(serverInfo)
             }
         }
         val ProxiedPlayer.newName : String? get() = newNameMap[this]
         val ProxiedPlayer.newUUID : UUID? get() =
-            dataForFaking.getString("$uniqueId.uniqueId", null).let { UUID.fromString(it) }
+            dataForFaking.getString("$uniqueId.uniqueId", null)?.let { UUID.fromString(it) }
         val ProxiedPlayer.newLoginResult : LoginResult? get() = newLoginResultMap[this]
-        private fun ProxiedPlayer.loadNewLoginResult(future: (error: Throwable?) -> Unit) {
+        fun ProxiedPlayer.loadNewLoginResult(future: (error: Throwable?) -> Unit) {
             val thisAsUser = this as UserConnection
-            HttpClient.get(MOJANG_PROFILE_URL.format(newUUID), thisAsUser.ch.handle.eventLoop()) { result, error ->
+            HttpClient.get(MOJANG_PROFILE_URL.format("$newUUID".replace("-", "")), thisAsUser.ch.handle.eventLoop()) { result, error ->
                 error ?: run {
-                    newLoginResultMap[this] = BungeeCord.getInstance().gson.fromJson(result, LoginResult::class.java)
+                    val newLoginResult = BungeeCord.getInstance().gson.fromJson(result, LoginResult::class.java)!!
+                    newLoginResultMap[this] = newLoginResult
+                    newNameMap[this] = newLoginResult.name
                 }
+                println(result)
                 future(error)
             }
         }
 
-        private val newNameMap = WeakHashMap<ProxiedPlayer, String>()
-        private val newLoginResultMap = WeakHashMap<ProxiedPlayer, LoginResult>()
+        private val newNameMap = MapMaker().weakKeys().makeMap<ProxiedPlayer, String>()
+        private val newLoginResultMap = MapMaker().weakKeys().makeMap<ProxiedPlayer, LoginResult>()
 
 //        private fun <V> weakMultiMap() =
 //            Multimaps.newListMultimap<ProxiedPlayer, V>(WeakHashMap()) { ArrayList() }!!
 
         fun ProxiedPlayer.applyFaking(newUUID: UUID, future: () -> Unit = {}) {
-            dataForFaking.getSection("$uniqueId").apply {
-                set("uniqueId", newUUID)
-            }
+            dataForFaking.set("$uniqueId.uniqueId", "$newUUID")
             loadNewLoginResult {
                 future()
-                if (isConnected) reconnect()
+                reconnect()
             }
         }
         fun ProxiedPlayer.unApplyFaking() {
-            dataForFaking.set("$uniqueId", null)
+            dataForFaking.set("$uniqueId.uniqueId", null)
             newNameMap -= this
             newLoginResultMap -= this
-            if (isConnected) reconnect()
+            reconnect()
         }
     }
 
@@ -75,6 +106,10 @@ class BtwImKomq : Plugin() {
         instance = this
         registerListeners()
         registerCommands()
+    }
+
+    override fun onDisable() {
+        ConfigurationProvider.getProvider(YamlConfiguration::class.java).save(dataForFaking, dataFile)
     }
 
     private fun registerListeners() = packageOf("listener").objects.forEach {
